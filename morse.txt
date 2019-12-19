@@ -1,62 +1,249 @@
+#include <MsTimer2.h>
+#include <LiquidCrystal_I2C.h>
 
-const byte interruptPin = 2;
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+const byte interruptPin = 2; //스위치 핀 번호
 
-int unitTime = 1000; //단점 1초, 장점 3초, 무음1초 - 점 구분, 무음3초 - 단어 구분, 무음 7초 - 문자열 구분
+int unitTime = 500; //단점 1초, 장점 3초, 무음1초 - 점 구분, 무음3초 - 단어 구분, 무음 7초 - 문자열 구분
+int count = 0; //푼 문제 개수
+int correct = 0; //맞은 문제 개수
 unsigned long Time = 0; //점 구분 시간
 unsigned long lastTime = 0; //최근 받아온 시간
-boolean state = false;
-//String
+unsigned long debounceDelay = 50; //디바운스 기준 시간
 
-//단점 = 1, 장점 = 2
-int dotList[] = {12,2111,2121,211,1,1121,221,1111,11,
-                  1222,212,1211,22,21,222,1221,2212,121,
-                  111,2,112,1112,122,2112,2122,2211,22222,
-                  12222,11222,11122,11112,11111,21111,22111,22211,22221};
-char wordList[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                   'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-                   '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+boolean state_power; //전원 상태
+boolean state_clear = false;
+boolean state_result;
+boolean state_result2;
+boolean state_home; //홈 화면 여부
+boolean state_init_word;//단어 초기화 여부
+boolean pressed; //누른 상태, 뗀 상태 구분
 
-void showWord() {
-  Serial.println("Word!");
-  Serial.println("");
+//모스부호 변환 리스트, 단점 = 1, 장점 = 2
+String dotList[] = {"12", "2111", "2121", "211", "1", "1121", "221", "1111", "11",
+                    "1222", "212", "1211", "22", "21", "222", "1221", "2212", "121",
+                    "111", "2", "112", "1112", "122", "2112", "2122", "2211", "22222",
+                    "12222", "11222", "11122", "11112", "11111", "21111", "22111", "22211", "22221"
+                   };
+//단어 리스트
+String wordList[] = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                     "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+                     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+                    };
+String words = ""; //누적된 숫자
+String str1 = ""; //lcd 1행
+String str2 = ""; //lcd 2행
+String str3 = ""; //입력된 문자열
+
+
+void initStates() {
+  state_power=true;
+  state_result=false;
+  state_result2=false;
+  state_home = true;
+  state_init_word=false;
+  pressed = false;
 }
 
-void processState() {
-  Time = millis() - lastTime;
-  Serial.print("상태 : ");
-  Serial.print(state);
-  Serial.print(",    ");
-  if(!state) {
-    if(Time > unitTime) {
-      Serial.print("장무음  ");
-    } else {
-      Serial.print("단무음  ");
-    }
-  } else {
-    if(Time > unitTime) {
-      Serial.print("장점  ");
-    } else {
-      Serial.print("단점  ");
+// ----------------------------- lcd 컨트롤 ------------------------------------
+
+void startStudy() { //문제 맞추기 시작
+  state_home = false; //홈 화면 탈출
+  state_clear = true; //lcd 초기화
+  count = 0;
+  correct = 0;
+  //문제 출력
+  makeQuiz();
+}
+
+void makeQuiz() {
+  //랜덤으로 스트링 설정
+  state_clear = true;
+  str1 = "S";
+  str3 = "";
+}
+
+void setStrings(String mStr1, String mStr2) {
+  str1 = mStr1;
+  str2 = mStr2;
+}
+
+String getString(int num) {
+  switch (num) {
+    case 1:
+      return str1;
+    case 2:
+      return str2;
+    case 3:
+      return str3;
+    default:
+      return "";
+  }
+}
+
+// ------------------------------ 단어 매핑 --------------------------------------
+
+String mapWord() { //누적된 숫자를 문자로 변경하는 함수
+  String temp = "";
+  for (int i = 0; i < sizeof(wordList) / sizeof(String); i++) {
+    if (words.equals(dotList[i])) {
+      temp = wordList[i];
+      break;
     }
   }
-  state = !state;
-  Serial.println(Time);
-  lastTime = millis();
+  if (temp == "") {
+    Serial.println("일치하는 단어가 존재하지 않습니다.");
+  }
+  words = "";
+  return temp;
 }
+
+void stopInput() { //3초간 미입력시 입력 중지 및 문자열 출력
+  if (state_home) {
+    str3 += mapWord();
+    if (str3.equals("S")) {
+      startStudy();
+    } else if (str3.equals("E")) {
+      state_power = false;
+    }
+  } else {
+    state_result = true;
+    str3 += mapWord();
+    Serial.println(str3);
+    if (str3.equals(str1)) { //정답일 경우
+      //피에조 부조로 딩동댕동
+      //정답입니다 화면 표시
+      setStrings(getString(1), "Sucess");
+      //맞은 개수 증가
+      correct++;
+    } else {//오답일 경우
+      //피에조 부조로 땡
+      //LED on
+      setStrings(getString(1), "Fail");
+      //코딩 시간 남으면 1행 -> 정답 소리 듣기 : S, 2행 -> 다음 문제 풀기 : E
+    }
+    //문제 개수 증가
+    count++;
+    state_init_word = true;
+    MsTimer2::stop();
+  }
+}
+
+
+// -------------------------------- 스위치 인터럽트 로직 -------------------------------------
+
+void processState() {       //스위치 입력 처리
+  Time = millis() - lastTime;
+  if (Time > debounceDelay) {
+    MsTimer2::stop();
+    if (!state_power) {                   //전원이 꺼져있으면
+      if (pressed) {
+         Serial.println("뗄 때");
+        initStates();
+        setStrings("Menu", "Start:ooo,End:o");                      //홈 화면 출력
+      } else {
+         Serial.println("누를때");
+        pressed = true;
+      }
+    } else if (state_result) {
+      if (pressed) {
+        //led off
+        if (count >= 5) {
+          state_result2 = true;
+          String temp = (String)correct + " Correct!";
+          setStrings("5 Quizzes", temp);
+        } else {
+          makeQuiz();
+        }
+        state_result = false;
+        pressed = false;
+        Serial.println("뗄 때");
+      } else {
+        Serial.println("누를때");
+        pressed = true;
+      }
+
+    } else if (state_result2) {
+      if (pressed) {
+        state_clear = true;
+        setStrings("Menu", "Start:ooo,End:o");
+        state_home = true;
+        state_result2 = false;
+        pressed = false;
+      } else {
+        pressed = true;
+      }
+
+    } else {                              //전원이 켜져있으면 스위치 인터럽트 처리
+      //버튼의 상태가 변할때 까지의 시간 계산
+      if (!pressed) {                     //버튼을 누를 때(무음)
+        if (Time > unitTime) {            //장무음일 경우
+          str3 += mapWord();              //알파벳 하나가 추가
+        } else {                          //단무음일 경우
+        }
+        pressed = true;                   //버튼을 누른 상태
+
+      } else {                            //버튼을 뗄 때
+        if (Time > unitTime) {            //장점일 경우
+          words += "2";                   //누적 숫자 리스트에 2 추가
+        } else {                          //단점일 경우
+          words += "1";                   //누적 숫자 리스트에 1 추가
+        }
+        pressed = false;                  //버튼을 뗀 상태
+      }
+      lastTime = millis();                //장, 단을 구분하기 위한 시간 재설정
+
+      MsTimer2::start();                    //타이머 재시작
+      Serial.println("타이머 스타트");
+    }
+  }
+}
+
 
 
 
 void setup() {
   // put your setup code here, to run once:
-  pinMode(interruptPin, INPUT_PULLUP);
-  Serial.begin(9600);
+  pinMode(interruptPin, INPUT_PULLUP);   //스위치 핀 등록
+  Serial.begin(9600);                    //시리얼 등록
   Serial.println("test start");
-  attachInterrupt(digitalPinToInterrupt(interruptPin), processState, CHANGE);
+  initStates();
+  MsTimer2::set(unitTime * 3, stopInput);  //단어 구분 타이머 등록
+  attachInterrupt(digitalPinToInterrupt(interruptPin), processState, CHANGE); //스위치 인터럽트 등록
+  setStrings("Menu", "Start:ooo,End:o");                        //홈 화면 문자열 등록
+  lcd.begin();                          //lcd 등록
+  lcd.backlight();                      //조명 on
   //attachInterrupt(digitalPinToInterrupt(interruptPin), initState, FALLING);
   //attachInterrupt(digitalPinToInterrupt(interruptPin), processState, RISING);
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
+  if (!state_power) {
+    lcd.clear();
+    lcd.noBacklight();
+    lcd.noDisplay();
+  } else {
+    lcd.display();
+    lcd.backlight();
+  }
 
+  if (state_clear) {
+    lcd.clear();
+    state_clear = false;
+  }
+
+  lcd.setCursor(0, 0); //1행
+  lcd.print(str1); //랜덤 문자 혹은 단어 출력
+  lcd.setCursor(0, 1); //2행
+  if (state_home || state_result || state_result2) {
+    lcd.print(str2); //
+
+  } else {
+    lcd.print(str3); //사용자 입력 단어
+  }
+  if (state_init_word) {
+    str3 = "";
+    state_init_word = false;
+  }
 }

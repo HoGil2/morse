@@ -139,6 +139,7 @@ void runLED() {//오답 입력시 정답을 알려주는 기능을 하는 함수
   if (!state_led) {
     i = 0;
     j = 0;
+    num = 0;
     state_led = true;
   }
 
@@ -147,8 +148,11 @@ void runLED() {//오답 입력시 정답을 알려주는 기능을 하는 함수
       controll.remove(&runLEDThread);
       state_led = false;
       return;
+    } if (str1[i] > 62) {
+      str3 = dotList[str1[i] - 'A'];
+    } else {
+      str3 = dotList[str1[i] - 22];
     }
-    str3 = dotList[str1[i] - 'A'];
     if (str3[j] == '1') {
       num = 1;
     } else if (str3[j] == '2') {
